@@ -1,0 +1,113 @@
+#! /usr/bin python 3.5
+# -*- coding: utf-8 -*-
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pylab
+import math
+
+tauc = 4*10**(-12)#с - время захвата электрона
+taur = 100*10**(-12)#с - рекомбинационное время жизни
+taus = 170*10**(-15)#с - время рассеяния
+r = 10**(-3);# см размер пучка
+R0 = 0.2;# см радиус кривизны линзы
+nSi = 3.48;# показатель преломления кремния
+w0 = 10**(-3);# см размер пучка в перетяжке
+nair = 1;# показатель преломления воздуха
+nInGaAs = 3.5;# показатель преломления InGaAs
+I0 = 2.9*10**(17);# Эрг/(см^2*c)
+v = 2*10**14;# Гц частота лазера
+taurate = 100*10**(-15);# с время длительности импульса
+T = 10**(-4);#см активный слой подложки
+W = 2*10**(-3);# см ширина электрода
+nue = 1.2*10**(5);# см^2/(ед.СГС*с) подвижность электронов
+nu = 1000# фактор экранирования
+alpha = 1.04*10**(4);# см^(-1) поглощение
+e = 4.8*10**(-10);# ед. заряда СГС
+c = 3*10**(10);# см/с скорость света
+L = 2*10**(-3);# cм зазор
+A = W*L;# площадь зазора
+z = 1;# расстояние от генератора до детектора
+Eb = 50;# ед.СГС - напряженность поля смещения
+#N = 2001;# кол-во точек
+#T0 = 12.5*10**(-12);# c временной интервал
+R = ((nInGaAs-nair)/(nInGaAs+nair))**2;
+h = 6.6*10**(-27);# Эрг*с
+W0 = I0*alpha*(1-R)/(h*v)*math.exp(-2*r*r/w0/w0);
+me = 0.2457*10**(-28)# г - эффективная масса электрона в InGaAs
+
+class Solve():
+    def __init__(self, N = 2001, T0 = 12.5*10**(-12), n_0 = 0, n_1 = 0, n_2 = 0, t_0 = 0):
+        self.N = N
+        self.T0 = T0
+        self.n_0 = n_0
+        self.n_1 = n_1
+        self.n_2 = n_2
+        self.t_0 = t_0
+        self.tau = T0/N
+        self.ne = np.zeros((N,3), dtype = np.float64)
+        self.t = np.zeros((N, ), dtype = np.float64)
+        self.ETHz = np.zeros((N - 1,), dtype=np.float64)  # Поле THz
+        self.EFTHz = np.zeros((N - 1,), dtype=np.float64)  # Фурье - компоненты ТГц поля
+        self.ETHzn = np.zeros((N - 1,), dtype=np.float64)
+        self.freq = np.zeros((N - 1,), dtype=np.float64)
+
+    def f(self, t, n):
+        return np.asarray([W0 * math.exp(-t ** 2 / taurate / taurate) - n[0] / tauc, -n[1] / taur + n[0] * e * n[2], -n[2] / taur + e / me * (Eb - n[1] / (nu * nInGaAs ** 2))], dtype=np.float64)
+
+    def Runge(self):
+        self.ne[0,:] = np.asarray([self.n_0, self.n_1, self.n_2])
+        self.t[0] = self.t_0
+        for i in range(0, self.N-1):
+            nc = self.ne[i,:]
+            tc = self.t[i]
+            k1 = self.f(tc, nc)
+            k2 = self.f(tc + self.tau*0.5, nc + self.tau*k1*0.5)
+            k3 = self.f(tc +self.tau*0.5, nc + self.tau*k2*0.5)
+            k4 = self.f(tc + self.tau, nc + self.tau*k3)
+            self.t[i+1] = self.t[i] + self.tau
+            self.ne[i+1,:] = self.ne[i,:] + 1./6.*self.tau*(k1 + 0.5*k2 + 0.5*k3 + k4)
+
+    def FastFourier(self, ):
+        ne = self.ne[:, 0]
+        vel = self.ne[:, 2]
+        ETHz = A * e / (c ** 2 * z) * np.diff(ne * vel) * self.N / self.T0
+        ETHzav = np.average(ETHz)
+        for i in range(len(ETHz)):
+            self.ETHzn[i] = ETHz[i] - ETHzav
+        self.EFTHz = np.absolute(np.fft.fft(self.ETHzn))
+        n = self.EFTHz.size
+        timestep = self.T0 / n
+        self.freq = np.fft.fftfreq(n, d=timestep)
+
+    def get_dots(self):
+        return self.t, self.ne, self.ETHzn, self.EFTHz, self.freq
+
+call = Solve()
+call.Runge()
+call.FastFourier()
+t, ne, ETHzn, EFTHz, freq = call.get_dots()
+
+plt.subplot(131)
+plt.plot(t*10**12, ne)
+pylab.xlabel('Time, ps')
+pylab.ylabel('Concentration, sm(-3)')
+pylab.ylim(ymin = 0)
+pylab.xlim(xmin = -1, xmax = 10)
+
+plt.subplot(132)
+plt.plot(t[0:2000]*10**(12), ETHzn[0:2000])
+pylab.xlabel('Time, ps')
+pylab.ylabel('Amplitude of THz field, a.u.')
+#pylab.ylim(ymin = -1, ymax = 1)
+pylab.xlim(xmin = -1, xmax = 10)
+
+plt.subplot(133)
+plt.plot(freq[0:2000]*10**(-12), EFTHz[0:2000])
+#plt.yscale('log')
+pylab.xlabel('Frequency, THz')
+pylab.ylabel('FourierAmplitude of THz field, a.u.')
+pylab.ylim(ymin = 0.001)
+pylab.xlim(xmin = -0.1, xmax = 10)
+
+plt.show()
